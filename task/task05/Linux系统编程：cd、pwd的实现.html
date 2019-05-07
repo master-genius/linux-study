@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+    <title>Linux系统编程：cd、pwd的实现</title>
+    <link rel="stylesheet" href="Linux%E7%B3%BB%E7%BB%9F%E7%BC%96%E7%A8%8B%EF%BC%9Acd%E3%80%81pwd%E7%9A%84%E5%AE%9E%E7%8E%B0_files/fdxy651.css">
+    <link rel="stylesheet" href="Linux%E7%B3%BB%E7%BB%9F%E7%BC%96%E7%A8%8B%EF%BC%9Acd%E3%80%81pwd%E7%9A%84%E5%AE%9E%E7%8E%B0_files/docco.css">
+    <script>
+
+    </script>
+<style id="style-1-cropbar-clipper">/* Copyright 2014 Evernote Corporation. All rights reserved. */
+.en-markup-crop-options {
+    top: 18px !important;
+    left: 50% !important;
+    margin-left: -100px !important;
+    width: 200px !important;
+    border: 2px rgba(255,255,255,.38) solid !important;
+    border-radius: 4px !important;
+}
+
+.en-markup-crop-options div div:first-of-type {
+    margin-left: 0px !important;
+}
+</style></head>
+<body>
+<div class="full-container">
+    <div class="grid-x" style="margin-top:0.8rem;margin-bottom:1.5rem;">
+        <div class="cell medium-1 large-2"></div>
+        <div class="cell small-12 medium-10 large-8" style="padding-left:0.2rem;padding-right:0.2rem;" id="content"><h2 id="linux系统编程：cd、pwd的实现">Linux系统编程：cd、pwd的实现</h2>
+<hr>
+<p>这几个命令在Linux中经常会用到，但是，如何实现命令是本节课的主题。通过研究命令如何工作加深对Linux系统的理解。</p>
+<h3 id="cd命令如何切换工作目录">cd命令如何切换工作目录</h3>
+<p>cd切换工作目录使用的是chdir系统调用，通过查阅系统调用手册，发现chdir的信息如下：</p>
+<pre><code class="language-c hljs cpp">SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">chdir</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *path)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">fchdir</span><span class="hljs-params">(<span class="hljs-keyword">int</span> fd)</span></span>;
+
+   <span class="hljs-function">Feature Test Macro Requirements <span class="hljs-keyword">for</span> <span class="hljs-title">glibc</span> <span class="hljs-params">(see feature_test_macros(<span class="hljs-number">7</span>))</span>:
+       <span class="hljs-title">fchdir</span><span class="hljs-params">()</span>:
+           _BSD_SOURCE || _XOPEN_SOURCE &gt;</span>= <span class="hljs-number">500</span> || _XOPEN_SOURCE &amp;&amp;     
+               _XOPEN_SOURCE_EXTENDED
+           || <span class="hljs-comment">/* Since glibc 2.12: */</span> _POSIX_C_SOURCE &gt;= <span class="hljs-number">200809L</span>
+DESCRIPTION
+    chdir()  changes  the current working directory of the calling process to the directory specified in path. fchdir() is identical to chdir(); the only difference is that the directory is given as an open file descriptor.
+
+RETURN VALUE
+    On  success, zero is returned.  On error, <span class="hljs-number">-1</span> is returned,<span class="hljs-keyword">and</span> errno is <span class="hljs-built_in">set</span> appropriately.
+.......
+.......</code></pre>
+<p>此文档说明调用此函数需要引入的头文件是unistd.h，chdir传递一个char*类型的参数指向要切换到目录字符串，返回值是int，0表示没有错误，-1表示出错。</p>
+<p>似乎这一个函数不能解决所有的问题，想想cd命令的功能，当直接运行cd，会切换到当前用户主目录。所以要支持这个功能，需要获取当前用户的信息或
+者是直接获取主目录信息。解决这个问题的方法不止一种，但有一个比较快的方式是使用getenv函数，不过这不是一个Linux系统调用，而是C语言标准
+库函数。需要引入&lt;stdlib.h&gt;然后调用此函数：</p>
+<p>char* getenv (const char *name);</p>
+<p>getenv会从系统环境变量里去搜索name指定的变量，并返回指向此变量的指针，没有找到则返回NULL。这个函数的实现是依赖于平台的，并且环境变量的name在每个平台上都会有不同。在Linux/Unix上，使用getenv("HOME")获取用户主目录。</p>
+<p>目前来说进展不错，现在的工作就是整合这些信息进行编码：</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span> <span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *argv[])</span>
+</span>{
+    <span class="hljs-keyword">if</span> (argc&lt;<span class="hljs-number">2</span>) {
+        <span class="hljs-keyword">if</span>(chdir( getenv(<span class="hljs-string">"HOME"</span>) ) &lt; <span class="hljs-number">0</span>){
+            perror(<span class="hljs-string">"chdir"</span>);
+            <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+        }
+    } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (chdir(argv[<span class="hljs-number">1</span>]) &lt; <span class="hljs-number">0</span>) {
+        perror(<span class="hljs-string">"chdir"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}</code></pre>
+<p>代码可以正常编译执行，可是结果却不是预期的那样切换工作目录。为什么会这样？</p>
+<p>想想shell运行命令的流程：</p>
+<p><strong>解析命令参数  -&gt; 查找命令所在目录 -&gt; fork子进程调用exec*相关函数运行命令</strong></p>
+<p>答案很明显：cd操作发生在fork出的子进程中，对shell无效。所以shell把cd、pwd等一些操作实现为内建命令，由shell调用这些系统接口去实现。</p>
+<h3 id="pwd如何工作">pwd如何工作</h3>
+<p>尽管pwd也是shell实现的内建命令，但是独立编写的命令也是可以显示当前工作目录的，再次考虑shell运行命令的过程，fork出的子进程会继承父进程的全部信息，工作目录和父进程是相同的，此时就可以获取工作目录并输出。</p>
+<p>获取工作目录的系统调用：</p>
+<pre><code class="language-c hljs cpp">NAME
+       getcwd, getwd, get_current_dir_name - get current working directory
+
+SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+       <span class="hljs-function"><span class="hljs-keyword">char</span> *<span class="hljs-title">getcwd</span><span class="hljs-params">(<span class="hljs-keyword">char</span> *buf, <span class="hljs-keyword">size_t</span> size)</span></span>;
+
+       <span class="hljs-function"><span class="hljs-keyword">char</span> *<span class="hljs-title">getwd</span><span class="hljs-params">(<span class="hljs-keyword">char</span> *buf)</span></span>;
+
+       <span class="hljs-function"><span class="hljs-keyword">char</span> *<span class="hljs-title">get_current_dir_name</span><span class="hljs-params">(<span class="hljs-keyword">void</span>)</span></span>;
+
+DESCRIPTION
+       These functions <span class="hljs-keyword">return</span> a null-terminated <span class="hljs-built_in">string</span> containing 
+       an absolute pathname that is  the  current working directory 
+       of the calling process.  The pathname is returned as the 
+       function result <span class="hljs-keyword">and</span> via the argument buf, <span class="hljs-keyword">if</span> present. 
+          ......
+       getwd()  does  <span class="hljs-keyword">not</span> <span class="hljs-built_in">malloc</span>(<span class="hljs-number">3</span>) any memory.  The buf argument 
+       should be a pointer to an <span class="hljs-built_in">array</span> at least PATH_MAX bytes 
+       <span class="hljs-keyword">long</span>.  If the length of the absolute pathname  of  the 
+       current  working directory,  including  the terminating null 
+       byte, exceeds PATH_MAX bytes, <span class="hljs-literal">NULL</span> is returned, <span class="hljs-keyword">and</span> errno is 
+       <span class="hljs-built_in">set</span> to ENAMETOOLONG.
+
+RETURN VALUE
+       On  success, these functions <span class="hljs-keyword">return</span> a pointer to a <span class="hljs-built_in">string</span> 
+       containing the pathname of the current working directory.  
+       In the <span class="hljs-keyword">case</span> getcwd() <span class="hljs-keyword">and</span> getwd() <span class="hljs-keyword">this</span>  is  the  same value 
+       as buf.
+
+       On  failure,  these  functions  <span class="hljs-keyword">return</span> <span class="hljs-literal">NULL</span>, <span class="hljs-keyword">and</span> errno is 
+       <span class="hljs-built_in">set</span> to indicate the error. The contents of the <span class="hljs-built_in">array</span> pointed 
+       to by buf are undefined on error.
+
+......</code></pre>
+<p>通过文档描述发现，可使用的函数不止一个，这里使用getcwd获取当前工作目录，getcwd接受两个参数，第一个参数表明获取的目录信息要存储
+的位置，第二个是最大存储长度（字节数），这里引入了&lt;linux/limits.h&gt;，其中的宏定义PATH_MAX作为最大长度。成功获
+取当前工作目录则返回指向目录字符串的指针，否则返回NULL。</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;linux/limits.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span> <span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *argv[])</span>
+</span>{
+    <span class="hljs-keyword">char</span> buf[PATH_MAX] = {<span class="hljs-string">'\0'</span>};
+    <span class="hljs-keyword">if</span> (getcwd(buf,PATH_MAX)==<span class="hljs-literal">NULL</span>) {
+        perror(<span class="hljs-string">"getcwd"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>,buf);
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}</code></pre>
+<p>这个程序是可以正常执行的，会输出当前工作目录。</p>
+</div>
+        <div class="cell medium-1 large-2"></div>
+    </div>
+</div>
+
+<script>
+</script>
+
+
+</body></html>
