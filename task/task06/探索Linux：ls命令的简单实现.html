@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+    <title>探索Linux：ls命令的简单实现</title>
+    <link rel="stylesheet" href="lsp_ls_files/fdxy651.css">
+    <link rel="stylesheet" href="lsp_ls_files/docco.css">
+</head>
+<body>
+<div class="full-container">
+    <div class="grid-x" style="margin-top:0.8rem;margin-bottom:1.5rem;">
+        <div class="cell medium-1 large-2"></div>
+        <div class="cell small-12 medium-10 large-8" style="padding-left:0.2rem;padding-right:0.2rem;" id="content"><h2 id="探索linux：ls命令的简单实现">探索Linux：ls命令的简单实现</h2>
+<p>ls是Linux上最常用的命令之一。可以显示目录/文件的名称，路径，大小，权限，所属用户等基本信息。看起来ls的工作似乎只是显示文件、目录
+的基本信息这么简单。仔细想想，这些事情做起来却不是很容易：如何判断参数是不是一个存在的文件/目录、如何读取目录内容、如何判断是目录还是普通文件还
+是符号链接或是其他类型的文件、递归读取目录信息、输出信息排列、不同类型输出不同颜色、分类统计...；</p>
+<p>所以ls命令的实现，至少需要以下要实现的操作：</p>
+<ol>
+<li>判断文件/目录是否存在</li>
+<li>打开，读取，关闭目录</li>
+<li>获取文件/目录的详细信息</li>
+<li>获取文件/目录的所属用户和组</li>
+<li>对输出进行排序</li>
+<li>递归读取目录</li>
+<li>对不同类型用不同颜色标记</li>
+<li>支持使用尾部字符标记文件类型</li>
+<li>支持统计功能，统计不同类型的文件数量</li>
+<li>如果是软链接，获取目标文件的路径</li>
+</ol>
+<p>那么如何实现一个简单的ls命令，这里通过实现简单的ls命令探索Linux系统。我们不会一次实现所有的功能，而是实现一个最简单的，然后逐步添加，甚至会重构代码。</p>
+<p>一个简单的ls命令处理过程：</p>
+<p><strong>获取参数 -&gt; 判断文件是否存在 -&gt; 获取文件状态判断类型 -&gt; 如果是目录则显示目录内容，否则直接输出</strong></p>
+<h3 id="如何判断文件或目录存不存在">如何判断文件或目录存不存在</h3>
+<p>access接口可以完成此功能，通过man 2 acccess查看文档部分内容如下：</p>
+<pre><code class="language-C hljs">ACCESS(<span class="hljs-number">2</span>)                           Linux Programmer'<span class="hljs-function">s Manual                           <span class="hljs-title">ACCESS</span><span class="hljs-params">(<span class="hljs-number">2</span>)</span>
+
+NAME
+       access, faccessat - check user's permissions <span class="hljs-keyword">for</span> a file
+
+SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+       <span class="hljs-keyword">int</span> <span class="hljs-title">access</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *pathname, <span class="hljs-keyword">int</span> mode)</span></span>;
+
+        ...
+
+<span class="hljs-function">DESCRIPTION
+    <span class="hljs-title">access</span><span class="hljs-params">()</span>  checks whether the calling process can access the file pathname.  If pathname is a symbolic link, it is dereferenced.
+
+    The mode specifies the accessibility <span class="hljs-title">check</span><span class="hljs-params">(s)</span> to be performed, <span class="hljs-keyword">and</span> is  either  the  value F_OK, <span class="hljs-keyword">or</span> a mask consisting of the bitwise OR of one <span class="hljs-keyword">or</span> more of R_OK, W_OK, <span class="hljs-keyword">and</span> X_OK.  F_OK tests <span class="hljs-keyword">for</span> the existence of the file.  R_OK, W_OK, <span class="hljs-keyword">and</span> X_OK test whether  the file exists <span class="hljs-keyword">and</span> grants read, write, <span class="hljs-keyword">and</span> execute permissions, respectively.
+
+    The  check is done <span class="hljs-keyword">using</span> the calling process's real UID <span class="hljs-keyword">and</span> GID, rather than the effective IDs as is done when actually attempting 
+        ...
+RETURN VALUE
+    On <span class="hljs-title">success</span> <span class="hljs-params">(all requested permissions granted, <span class="hljs-keyword">or</span> mode is F_OK <span class="hljs-keyword">and</span> the file exists)</span>,  zero is returned.  On <span class="hljs-title">error</span> <span class="hljs-params">(at least one bit in mode asked <span class="hljs-keyword">for</span> a permission that is denied, <span class="hljs-keyword">or</span> mode is F_OK <span class="hljs-keyword">and</span> the file does <span class="hljs-keyword">not</span> exist, <span class="hljs-keyword">or</span> some other error occurred)</span>, -1  is returned,<span class="hljs-keyword">and</span> errno is <span class="hljs-built_in">set</span> appropriately.
+...</span></code></pre>
+<p>access接口接受两个参数，第一个是字符串指针，指向文件/目录的路径字符串，第二个是整数类型，整数的值使用宏定义表示，R_OK, 
+W_OK, 
+X_OK分别表示可读，可写，可执行。F_OK表示文件/目录存在。access成功返回0，错误返回-1。以下代码是access使用示例，用于检测文
+件是否存在。</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span>* argv[])</span>
+</span>{
+
+    <span class="hljs-keyword">if</span> (argc &lt; <span class="hljs-number">2</span>) {
+        dprintf(<span class="hljs-number">2</span>, <span class="hljs-string">"Error: less arguments -&gt; file/dir name\n"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+    }
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i=<span class="hljs-number">1</span>; i &lt; argc; i++) {
+        <span class="hljs-keyword">if</span> (access(argv[i], F_OK) &lt; <span class="hljs-number">0</span>)
+            dprintf(<span class="hljs-number">2</span>, <span class="hljs-string">"Error: %s not exists\n"</span>, argv[i]);
+        <span class="hljs-keyword">else</span>
+            <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s exists\n"</span>, argv[i]);
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<br>
+
+<h3 id="如何获取文件详细信息">如何获取文件详细信息</h3>
+<p>Linux提供了stat，lstat，fstat系统调用用于获取文件详细信息。几个系统调用存在些许区别，stat和lstat通过字符串路径
+传递参数，并把获取的信息放在一个struct 
+stat结构中，lstat和stat的区别是如果路径是一个符号链接，lstat获取的是符号链接文件自己的信息，而stat获取的是符号链接指向的目
+标文件的信息。通过man 2 stat查看联机文档：</p>
+<pre><code class="language-c hljs cpp">STAT(<span class="hljs-number">2</span>)                             Linux Programmer'<span class="hljs-function">s Manual                             <span class="hljs-title">STAT</span><span class="hljs-params">(<span class="hljs-number">2</span>)</span>
+
+NAME
+       stat, fstat, lstat, fstatat - get file status
+
+SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+       <span class="hljs-keyword">int</span> <span class="hljs-title">stat</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *pathname, struct stat *statbuf)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">fstat</span><span class="hljs-params">(<span class="hljs-keyword">int</span> fd, struct stat *statbuf)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">lstat</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *pathname, struct stat *statbuf)</span></span>;
+        ......
+        ......
+DESCRIPTION
+    These  functions <span class="hljs-keyword">return</span> information about a file, in the buffer 
+pointed to by statbuf.  No permissions are required on the file 
+itself, but—in the <span class="hljs-keyword">case</span>  of  stat(),  fstatat(),  <span class="hljs-keyword">and</span> 
+lstat()—execute (search) permission is required on all of the
+directories in pathname that lead to the file.
+
+        ......
+   lstat()  is  identical  to  stat(),  except  that  <span class="hljs-keyword">if</span> pathname is a symbolic link, then it returns information about the link itself,<span class="hljs-keyword">not</span> the file that it refers to.
+
+    fstat() is identical to stat(), except that the file about which information  is  to  be retrieved is specified by the file 
+descriptor fd.
+
+   The stat structure All of these system calls <span class="hljs-keyword">return</span> a stat structure, which contains the following fields:
+
+    struct stat {
+        <span class="hljs-keyword">dev_t</span>     st_dev;      <span class="hljs-comment">/* ID of device containing file */</span>
+        <span class="hljs-keyword">ino_t</span>     st_ino;      <span class="hljs-comment">/* Inode number */</span>
+        <span class="hljs-keyword">mode_t</span>    st_mode;     <span class="hljs-comment">/* File type and mode */</span>
+        <span class="hljs-keyword">nlink_t</span>   st_nlink;    <span class="hljs-comment">/* Number of hard links */</span>
+        <span class="hljs-keyword">uid_t</span>     st_uid;      <span class="hljs-comment">/* User ID of owner */</span>
+        <span class="hljs-keyword">gid_t</span>     st_gid;      <span class="hljs-comment">/* Group ID of owner */</span>
+        <span class="hljs-keyword">dev_t</span>     st_rdev;     <span class="hljs-comment">/* Device ID (if special file) */</span>
+        <span class="hljs-keyword">off_t</span>     st_size;     <span class="hljs-comment">/* Total size, in bytes */</span>
+        <span class="hljs-keyword">blksize_t</span> st_blksize;   <span class="hljs-comment">/* Block size for filesystem I/O */</span>
+        <span class="hljs-keyword">blkcnt_t</span>  st_blocks;  <span class="hljs-comment">/* Number of 512B blocks allocated */</span>
+
+        <span class="hljs-comment">/* Since Linux 2.6, the kernel supports nanosecond
+           precision for the following timestamp fields.
+           For the details before Linux 2.6, see NOTES. */</span>
+
+        <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">timespec</span> <span class="hljs-title">st_atim</span>;</span>  <span class="hljs-comment">/* Time of last access */</span>
+        <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">timespec</span> <span class="hljs-title">st_mtim</span>;</span>  <span class="hljs-comment">/* Time of last modification */</span>
+        <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">timespec</span> <span class="hljs-title">st_ctim</span>;</span>  <span class="hljs-comment">/* Time of last status change */</span>
+
+        <span class="hljs-comment">/* Backward compatibility */</span>
+        <span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> st_atime st_atim.tv_sec</span>
+
+        <span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> st_mtime st_mtim.tv_sec</span>
+        <span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> st_ctime st_ctim.tv_sec</span>
+    };
+
+       ......
+       ......
+       ......
+RETURN VALUE
+    On success, zero is returned.  On error, <span class="hljs-number">-1</span> is returned, <span class="hljs-keyword">and</span> errno is <span class="hljs-built_in">set</span> appropriately.
+......</code></pre>
+<p>此文档清晰地说明了函数调用方式，struct stat结构体中每个变量的含义。接下来我们写一个简单的程序测试lstat函数：</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;fcntl.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">out_st_info</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * path, struct stat * st)</span> </span>{
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s -&gt; size: %lu bytes\n"</span>, path, st-&gt;st_size);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">"    i-node: %-9lu  hard link: %-2lu "</span>, st-&gt;st_ino, st-&gt;st_nlink);
+
+    <span class="hljs-keyword">char</span> * ptype = <span class="hljs-string">""</span>;
+    <span class="hljs-keyword">switch</span> (st-&gt;st_mode &amp; S_IFMT) {
+        <span class="hljs-keyword">case</span> S_IFDIR:
+            ptype = <span class="hljs-string">"dir"</span>;
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFIFO:
+            ptype = <span class="hljs-string">"fifo"</span>;
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFBLK:
+            ptype = <span class="hljs-string">"block device"</span>;
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFCHR:
+            ptype = <span class="hljs-string">"char device"</span>;
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFSOCK:
+            ptype = <span class="hljs-string">"sock"</span>;
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFREG:
+            ptype = <span class="hljs-string">"regular"</span>;
+            <span class="hljs-keyword">if</span> (access(path, X_OK)==<span class="hljs-number">0</span>) { <span class="hljs-comment">//如果可执行，输出可执行标记</span>
+                ptype = <span class="hljs-string">"regular*"</span>;
+            }
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> S_IFLNK:
+            ptype = <span class="hljs-string">"link"</span>;
+            <span class="hljs-keyword">break</span>;
+    };
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>,ptype);
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *argv[])</span>
+</span>{
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">stat</span> <span class="hljs-title">st</span>;</span>
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i=<span class="hljs-number">1</span>; i&lt;argc; i++) {
+        <span class="hljs-comment">//检测文件/目录是否存在</span>
+        <span class="hljs-keyword">if</span> (access(argv[i], F_OK)) {
+            dprintf(<span class="hljs-number">2</span>, <span class="hljs-string">"Error: %s is not exists\n"</span>, argv[i]);
+            <span class="hljs-keyword">continue</span>;
+        }
+        <span class="hljs-comment">//获取状态信息，成功则输出，失败输出错误信息</span>
+        <span class="hljs-keyword">if</span> (lstat(argv[i], &amp;st)==<span class="hljs-number">0</span>) {
+            out_st_info(argv[i], &amp;st);
+        } <span class="hljs-keyword">else</span> {
+            perror(<span class="hljs-string">"lstat"</span>);
+        }
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}</code></pre>
+<p>这个程序对argv获取的每个值作为路径传递给lstat获取文件信息，并使用out_st_info函数输出名称、大小、I-node号、硬链接数、类型等信息。</p>
+<h3 id="如何操作目录">如何操作目录</h3>
+<p>基于一切皆是文件的设计，目录也是文件，这意味着open函数可以打开目录，确实如此，但是打开后读取的数据却不正常，早期的类Unix系统会显示
+很多目录、文件名称并有很多其他字符，因为是结构化的目录数据。而在目前的Linux上测试发现并不会输出任何结果。目录存储的是文件名称，文件类型，文
+件大小等信息，需要一个存储结构。这需要一套对应的接口进行操作。</p>
+<p>Linux提供了目录操作相关的系统调用：opendir，readdir，closedir。通过名称就可以知道相应的操作。通过man 3 [API NAME]可以查看对应的说明手册。</p>
+<p>opendir接受一个字符串作为目录路径，成功打开目录返回一个DIR结构的指针，错误返回NULL。</p>
+<p>readdir从opendir返回的DIR*读取目录内容，每次返回一个struct dirent结构体指针，我们最关心的是其中的d_name存储文件的名称。</p>
+<p>closedir关闭opendir打开的目录，传递参数是DIR*，就是opendir的返回值。</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;fcntl.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;dirent.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *argv[])</span>
+</span>{
+    <span class="hljs-keyword">if</span> (argc&lt;<span class="hljs-number">2</span>) {
+        dprintf(<span class="hljs-number">2</span>,<span class="hljs-string">"Error:less DIR_NAME\n"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    DIR * dr = opendir(argv[<span class="hljs-number">1</span>]);
+    <span class="hljs-keyword">if</span> (dr==<span class="hljs-literal">NULL</span>) {
+        perror(<span class="hljs-string">"opendir"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">dirent</span> * <span class="hljs-title">r</span> = <span class="hljs-title">NULL</span>;</span>
+    <span class="hljs-keyword">while</span>((r=readdir(dr))!=<span class="hljs-literal">NULL</span>) {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>, r-&gt;d_name);
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}</code></pre>
+<br>
+
+<h3 id="ls命令的实现：最简版本">ls命令的实现：最简版本</h3>
+<p>第一个版本是一个对目录相关系统调用的示例，仅仅打开目录并列出目录内容。实现起来比较容易。这个程序通过读取参数作为目录或文件的名称，并显示相关信息。如果没有参数则默认读取 . （当前目录）。</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;dirent.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;fcntl.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">list_dir</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * path)</span></span>;
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *argv[])</span>
+</span>{
+    <span class="hljs-keyword">if</span> (argc&lt;<span class="hljs-number">2</span>) {
+        list_dir(<span class="hljs-string">"."</span>);
+    }
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i=<span class="hljs-number">1</span>; i&lt;argc; i++) {
+        <span class="hljs-keyword">if</span> (access(argv[i], F_OK)==<span class="hljs-number">0</span>) {
+            list_dir(argv[i]);
+        } <span class="hljs-keyword">else</span> {
+            dprintf(<span class="hljs-number">2</span>, <span class="hljs-string">"Error: %s is not exists\n"</span>, argv[i]);
+        }
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">list_dir</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * path)</span> </span>{
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">stat</span> <span class="hljs-title">st</span>;</span>
+    <span class="hljs-keyword">char</span> flag = <span class="hljs-string">'\0'</span>;
+    DIR * d = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">dirent</span> * <span class="hljs-title">rd</span> = <span class="hljs-title">NULL</span>;</span>
+    <span class="hljs-keyword">if</span> (lstat(path, &amp;st)&lt;<span class="hljs-number">0</span>) {
+        perror(<span class="hljs-string">"lstat"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+    <span class="hljs-keyword">if</span> (S_ISDIR(st.st_mode)) {
+        <span class="hljs-keyword">if</span> ((d=opendir(path))==<span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"opendir"</span>);
+            <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+        }
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s/:\n"</span>,path);
+        <span class="hljs-keyword">while</span>((rd=readdir(d))!=<span class="hljs-literal">NULL</span>) {
+            <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>, rd-&gt;d_name);
+        }
+        closedir(d);
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>, path);
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>这个程序功能十分简单，而且这仅仅是一个测试程序。为了能够区分我们自己实现的命令和系统默认的ls，我们把自己实现的版本命名为li。并且在后续课程中也使用li表示我们自己实现的ls命令。</p>
+</div>
+        <div class="cell medium-1 large-2"></div>
+    </div>
+</div>
+
+</body></html>
