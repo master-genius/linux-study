@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+    <title>Ubuntu和CentOS差异对比</title>
+    <link rel="stylesheet" href="./ubuntu-centos_files/fdxy651.min.css">
+    <link rel="stylesheet" href="./ubuntu-centos_files/docco.css">
+    
+<style>
+    .content-show {
+        padding-left:0.2rem;
+        padding-right:0.2rem;
+        background-color: #fafafe;
+    }
+</style>
+</head>
+<body>
+<div class="full-container">
+    <div class="grid-x" style="margin-top:0.8rem;margin-bottom:1.5rem;">
+        <div class="cell medium-1 large-3"></div>
+        <div class="cell small-12 medium-10 large-6 content-show" id="content"><h3 id="ubuntu和centos差异对比">Ubuntu和CentOS差异对比</h3>
+<blockquote>
+<p>linux,ubuntu,centos,apt,yum<br>ubuntu和centos的区别</p>
+</blockquote>
+<hr>
+<p>Ubuntu和CentOS都是非常流行的发行版，工作中可能都会涉及到，甚至要同时使用Ubuntu和CentOS。这里把Ubuntu和CentOS的区别做一些对比，方便查阅。</p>
+<h4 id="发行公司和发行版本">发行公司和发行版本</h4>
+<p><strong>Ubuntu</strong><br>Ubuntu由Canonical公司发行的开源操作系统。中文官网为cn.ubuntu.com。Ubuntu每年发布两个版本，分别在4月份和10月份，以年份和月份命名，比如Ubuntu 18.04，Ubuntu 19.10。</p>
+<p>每两年的4月份发行长期支持版（LTS），提供5年的技术支持，不过从2018年IBM收购RedHat后，Ubuntu18.04更改了支持策略，提供长达10年的技术支持。</p>
+<p><strong>CentOS</strong><br>RedHat公司的CentOS是RedHat版本的一个开源分支，由社区驱动。每个主要发行版本提供10年技术支持，现在RedHat已被IBM收购。</p>
+<h4 id="软件包管理">软件包管理</h4>
+<p>Ubuntu基于Debian开发，和Debian使用相同的包管理器，CentOS/RedHat是同样的包管理器。</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Ubuntu</th>
+<th>CentOS</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>本地包管理命令</td>
+<td>dpkg</td>
+<td>rpm</td>
+</tr>
+<tr>
+<td>网络包管理命令</td>
+<td>apt，从软件源安装，可以卸载本地包</td>
+<td>yum，从软件源安装，可以卸载本地包</td>
+</tr>
+</tbody></table>
+<p>使用apt和yum都支持update和upgrade进行更新升级，但是apt update仅仅是获取需要更新的信息，之后要使用apt upgrade进行系统和软件包的更新升级，而yum update和upgrade基本上是一致的，直接就进行系统和软件包的升级。</p>
+<h4 id="用户和组">用户和组</h4>
+<p>对用户和组的管理，有这样几个命令：adduser，addgroup，useradd，groupadd。感觉有点乱吧，到底该用哪个？</p>
+<p>在CentOS上，目前只有useradd和groupadd，而在Ubuntu上全部存在。不过在Ubuntu上推荐使用adduser和addgroup。</p>
+<p>在Ubuntu/Debian系列的发行版上，adduser和addgroup是比较新的命令，联机文档也给出了建议，使用adduser和addgroup代替useradd和groupadd。</p>
+<p>所以，简单总结如下表：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Ubuntu</th>
+<th>CentOS</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>创建用户</td>
+<td>adduser</td>
+<td>useradd</td>
+</tr>
+<tr>
+<td>创建用户组</td>
+<td>addgroup</td>
+<td>groupadd</td>
+</tr>
+<tr>
+<td>删除用户</td>
+<td>deluser</td>
+<td>userdel</td>
+</tr>
+<tr>
+<td>删除用户组</td>
+<td>delgroup</td>
+<td>groupdel</td>
+</tr>
+</tbody></table>
+<br>
+
+<h4 id="配置文件">配置文件</h4>
+<p>/etc包含了系统和软件的配置文件、系统服务控制脚本等。目录组织结构上，有一些区别。bash的默认配置文件名称有差别。</p>
+<h5 id="bash配置文件">bash配置文件</h5>
+<p>在Ubuntu上开始新的会话，bash运行除了/etc/下的配置文件，还会去读取当前用户主目录下的.profile以及.bashrc文件，之后运行新的bash，会读取.bashrc。.profile在CentOS上，换成了.bash_profile。</p>
+<h5 id="网络配置">网络配置</h5>
+<p>Ubuntu18.04使用了netplan作为网络配置管理。配置文件在/etc/netplan。而在Ubuntu16.04以及之前的版本，配置文件在/etc/network。CentOS的网络配置在/etc/sysconfig/network-scripts/目录。</p>
+<h5 id="virutalbox虚拟机配置静态ip">VirutalBox虚拟机配置静态IP</h5>
+<p>虚拟机使用DHCP进行动态的分配IP地址，在只有一个虚拟机系统的情况下，一般IP地址也不会变化，但是如果需要在同一台设备上同时启动多个虚拟机，IP地址往往会发生变化，这时候设置静态IP就比较方便。<br><br></p>
+<p><strong>Ubuntu18.04设置静态IP</strong></p>
+<p>配置文件名称会有所不同，但是都在/etc/netplan目录下，是.yaml文件。</p>
+<pre><code class="hljs properties"><span class="hljs-attr">network</span>:<span class="hljs-string"></span>
+    <span class="hljs-attr">ethernets</span>:<span class="hljs-string"></span>
+        <span class="hljs-attr">enp0s3</span>:<span class="hljs-string"></span>
+            <span class="hljs-attr">addresses</span>: <span class="hljs-string">[]</span>
+            <span class="hljs-attr">dhcp4</span>: <span class="hljs-string">true</span>
+            <span class="hljs-attr">optional</span>: <span class="hljs-string">true</span>
+        <span class="hljs-attr">enp0s8</span>:<span class="hljs-string"></span>
+            <span class="hljs-attr">addresses</span>:<span class="hljs-string"></span>
+              <span class="hljs-meta">-</span> <span class="hljs-string">192.168.56.102/24</span>
+            <span class="hljs-attr">dhcp4</span>: <span class="hljs-string">true</span>
+            <span class="hljs-attr">optional</span>: <span class="hljs-string">true</span></code></pre><br>
+
+<p>配置完成后，启用网络设置：<br><code class="hljs properties"><span class="hljs-attr">sudo</span> <span class="hljs-string">netplan apply</span></code><br><br></p>
+<p><strong>CentOS配置静态IP</strong></p>
+<p>在本机运行的VirtualBox虚拟机上，配置文件是/etc/sysconfig/network-scripts/ifcfg-enp0s8</p>
+<pre><code class="hljs ini"><span class="hljs-attr">TYPE</span>=Ethernet
+<span class="hljs-attr">PROXY_METHOD</span>=none
+<span class="hljs-attr">BROWSER_ONLY</span>=<span class="hljs-literal">no</span>
+<span class="hljs-attr">BOOTPROTO</span>=dhcp
+<span class="hljs-attr">DEFROUTE</span>=<span class="hljs-literal">yes</span>
+<span class="hljs-attr">IPV4_FAILURE_FATAL</span>=<span class="hljs-literal">no</span>
+<span class="hljs-attr">IPV6INIT</span>=<span class="hljs-literal">yes</span>
+<span class="hljs-attr">IPV6_AUTOCONF</span>=<span class="hljs-literal">yes</span>
+<span class="hljs-attr">IPV6_DEFROUTE</span>=<span class="hljs-literal">yes</span>
+<span class="hljs-attr">IPV6_FAILURE_FATAL</span>=<span class="hljs-literal">no</span>
+<span class="hljs-attr">IPV6_ADDR_GEN_MODE</span>=stable-privacy
+<span class="hljs-attr">NAME</span>=enp0s8
+<span class="hljs-attr">UUID</span>=<span class="hljs-number">5</span>b831cbd-<span class="hljs-number">831</span>e-<span class="hljs-number">42</span>f3-a17a-d3125fc960c8
+<span class="hljs-attr">DEVICE</span>=enp0s8
+<span class="hljs-attr">ONBOOT</span>=<span class="hljs-literal">yes</span>
+<span class="hljs-comment">#最后两行是单独加入的用于配置静态IP</span>
+<span class="hljs-attr">IPADDR</span>=<span class="hljs-number">192.168</span>.<span class="hljs-number">56.112</span>
+<span class="hljs-attr">NETMASK</span>=<span class="hljs-number">255.255</span>.<span class="hljs-number">255.0</span></code></pre><p>配置完成后，可以通过SSH客户端使用192.168.56.112连接。配置完成后，重启网络服务：<br><code class="hljs properties"><span class="hljs-attr">sudo</span> <span class="hljs-string">systemctl restart network.service</span></code></p>
+</div>
+        <div class="cell medium-1 large-3"></div>
+    </div>
+</div>
+
+</body></html>
