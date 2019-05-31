@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<!-- saved from url=(0055)http://localhost:7989/page/show?id=2019-05-31-13_58_55_ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+    <title>探索Linux：实现最小shell</title>
+    <link rel="stylesheet" href="./min-shell_files/fdxy651.min.css">
+    <link rel="stylesheet" href="./min-shell_files/docco.css">
+    
+<style>
+    .content-show {
+        padding-left:0.2rem;
+        padding-right:0.2rem;
+        background-color: #fafafe;
+    }
+</style>
+</head>
+<body>
+<div class="full-container">
+    <div class="grid-x" style="margin-top:0.8rem;margin-bottom:1.5rem;">
+        <div class="cell medium-1 large-3"></div>
+        <div class="cell small-12 medium-10 large-6 content-show" id="content"><h3 id="探索linux：实现最小shell">探索Linux：实现最小shell</h3>
+<hr>
+<blockquote>
+<p>本章内容通过使用C语言调用Linux系统接口实现一个最小shell来深入理解bash的工作方式。</p>
+</blockquote>
+<p><img src="./min-shell_files/shell-cmd.png" alt=""></p>
+<p>要实现最小shell，需要以下一些操作：</p>
+<ul>
+<li>如何创建子进程</li>
+<li>如何在一个进程中运行其他程序</li>
+<li>分割字符串解析出命令名称和参数</li>
+</ul>
+<p>fork用于创建子进程，这是之前就已经接触过的。接下来看看另外的两个操作如何实现。</p>
+<h4 id="字符串分割">字符串分割</h4>
+<p>C语言中提供了标准库函数strtok用于切割字符串。比如，"axdrtyucrtkp"使用"rt"分割之后变成"axd","yuc","kp"。</p>
+<p>对于高级语言这很容易实现，比如，在Python环境中，字符串 'abcdeabcdef' 可以直接使用：<br><code class="hljs perl"><span class="hljs-string">'abcdefgabcdefghi'</span>.<span class="hljs-keyword">split</span>(<span class="hljs-string">'cd'</span>)</code><br>分割成<br><code class="hljs json">['ab', 'eab', 'ef']</code><br>在PHP语言中，使用:<br><code class="hljs lisp">explode(':','/usr/bin<span class="hljs-symbol">:/usr/sbin</span><span class="hljs-symbol">:/bin</span><span class="hljs-symbol">:/sbin</span>')<span class="hljs-comment">;</span></code><br>可以把字符串分割成数组<br><code class="hljs json">['/usr/bin','/usr/sbin','/bin','/sbin']</code></p>
+<p>在C语言中没有这样高级的操作，库函数strtok提供了类似的操作。但是strtok函数不是把字符串分割为数组。而是按照分割子串，把源字符串对应的部分设置为'\0'，每次返回下一个字符串首地址，直到源字符串末尾或是没有分割字串。通过man 3 strtok查看库函数手册：</p>
+<pre><code class="language-c hljs cpp">STRTOK(<span class="hljs-number">3</span>)                           Linux Programmer'<span class="hljs-function">s Manual                           <span class="hljs-title">STRTOK</span><span class="hljs-params">(<span class="hljs-number">3</span>)</span>
+
+NAME
+       strtok, strtok_r - extract tokens from strings
+
+SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+
+       <span class="hljs-keyword">char</span> *<span class="hljs-title">strtok</span><span class="hljs-params">(<span class="hljs-keyword">char</span> *str, <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *delim)</span></span>;
+
+       <span class="hljs-function"><span class="hljs-keyword">char</span> *<span class="hljs-title">strtok_r</span><span class="hljs-params">(<span class="hljs-keyword">char</span> *str, <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *delim, <span class="hljs-keyword">char</span> **saveptr)</span></span>;
+    ......
+    ......
+<span class="hljs-function">DESCRIPTION
+    The <span class="hljs-title">strtok</span><span class="hljs-params">()</span> function breaks a <span class="hljs-built_in">string</span> into a sequence of zero <span class="hljs-keyword">or</span> more nonempty tokens.  On the first call to <span class="hljs-title">strtok</span><span class="hljs-params">()</span>, the <span class="hljs-built_in">string</span> to be parsed should be specified in str.   In  each subsequent call that should parse the same <span class="hljs-built_in">string</span>, str must be <span class="hljs-literal">NULL</span>.
+
+    The delim argument specifies a <span class="hljs-built_in">set</span> of bytes that delimit the tokens in the parsed <span class="hljs-built_in">string</span>. The caller may specify different strings in delim in successive calls that parse the  same <span class="hljs-built_in">string</span>.
+
+    Each  call  to  <span class="hljs-title">strtok</span><span class="hljs-params">()</span> returns a pointer to a null-terminated <span class="hljs-built_in">string</span> containing the next token.  This <span class="hljs-built_in">string</span> does <span class="hljs-keyword">not</span> include the delimiting byte.  If no more  tokens  are found,<span class="hljs-title">strtok</span><span class="hljs-params">()</span> returns <span class="hljs-literal">NULL</span>.
+       ......
+       ......
+RETURN VALUE
+   The <span class="hljs-title">strtok</span><span class="hljs-params">()</span> <span class="hljs-keyword">and</span> <span class="hljs-title">strtok_r</span><span class="hljs-params">()</span> functions <span class="hljs-keyword">return</span> a pointer to the next token, <span class="hljs-keyword">or</span> <span class="hljs-literal">NULL</span> <span class="hljs-keyword">if</span> there are no more tokens.
+</span></code></pre>
+<p>从这个函数的说明手册发现，strtok和其他调用有些不同。比如，要使用","分割字符串 "Linux,Unix,Windows"，初次调用是这样的形式：</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-keyword">char</span> src[<span class="hljs-number">1024</span>] = <span class="hljs-string">"Linux,Unix,Windows"</span>;
+<span class="hljs-keyword">char</span> * sub = <span class="hljs-literal">NULL</span>;
+sub = strtok(src, <span class="hljs-string">","</span>);</code></pre>
+<p>但是再次调用，由于还是对src进行分割，就是这样的形式：</p>
+<pre><code class="language-C hljs">sub = strtok(<span class="hljs-literal">NULL</span>, <span class="hljs-string">","</span>);</code></pre>
+<p>如果strtok返回NULL则分割结束。到这里，你可能会有疑惑，我们先来看一个完整的示例：</p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> *agrv[])</span> </span>{
+    <span class="hljs-keyword">char</span> src[<span class="hljs-number">1024</span>] = <span class="hljs-string">"Linux,Unix,Windowx,FreeBSD"</span>;
+    <span class="hljs-keyword">char</span> * dem = <span class="hljs-string">","</span>;
+    <span class="hljs-keyword">char</span> * sub = <span class="hljs-literal">NULL</span>;
+
+    sub = strtok(src, dem);
+    <span class="hljs-keyword">while</span> (sub!=<span class="hljs-literal">NULL</span>) {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>, sub);
+        sub = strtok(<span class="hljs-literal">NULL</span>, dem);
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}</code></pre>
+<p>这个程序会输出：</p>
+<pre><code class="language-c hljs cpp">Linux
+Unix
+Windows
+FreeBSD</code></pre>
+<p>现在我们来探索更多的细节，首先要知道的是，strtok会改变源字符串的值，如果在一开始使用strlen计算src的长度并保存，在strtok调用之后，根据src最开始的长度循环输出每个字符的数值，会发现','已经变成了'\0'，strtok是在src上操作，每次调用返回对应的指针位置。strtok调用完之后，src会变成这样："Linux\0Unix\0Windows\0FreeBSD"。</p>
+<p>另一个需要注意的问题是，分割字符串是一个字符集，比如使用";,"分割字符串 "Linux;Unix,Windows"，那么';'和','都会分割成'\0'，";,"也会分割成"\0\0"。这点和其他高级语言的使用方式不同。</p>
+<h4 id="在程序中运行其他程序：exec系列函数">在程序中运行其他程序：exec系列函数</h4>
+<p>execv，execvp等函数可以用来执行外部程序。通过man  3 execv查看手册：</p>
+<pre><code class="language-c hljs cpp">EXEC(<span class="hljs-number">3</span>)                             Linux Programmer'<span class="hljs-function">s Manual                             <span class="hljs-title">EXEC</span><span class="hljs-params">(<span class="hljs-number">3</span>)</span>
+
+NAME
+    execl, execlp, execle, execv, execvp, execvpe - execute a file
+
+SYNOPSIS
+       <span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+       <span class="hljs-keyword">extern</span> <span class="hljs-keyword">char</span> **environ</span>;
+
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execl</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *path, <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *arg, ...
+                       <span class="hljs-comment">/* (char  *) NULL */</span>)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execlp</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *file, <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *arg, ...
+                       <span class="hljs-comment">/* (char  *) NULL */</span>)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execle</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *path, <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *arg, ...
+                       <span class="hljs-comment">/*, (char *) NULL, char * const envp[] */</span>)</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execv</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *path, <span class="hljs-keyword">char</span> *<span class="hljs-keyword">const</span> argv[])</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execvp</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *file, <span class="hljs-keyword">char</span> *<span class="hljs-keyword">const</span> argv[])</span></span>;
+       <span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">execvpe</span><span class="hljs-params">(<span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *file, <span class="hljs-keyword">char</span> *<span class="hljs-keyword">const</span> argv[],
+                       <span class="hljs-keyword">char</span> *<span class="hljs-keyword">const</span> envp[])</span></span>;
+
+<span class="hljs-function">DESCRIPTION
+    The  <span class="hljs-title">exec</span><span class="hljs-params">()</span>  family  of  functions  replaces  the current process image with a <span class="hljs-keyword">new</span> process image.  The functions described in <span class="hljs-keyword">this</span> manual page are front-ends  <span class="hljs-keyword">for</span>  <span class="hljs-title">execve</span><span class="hljs-params">(<span class="hljs-number">2</span>)</span>.   <span class="hljs-params">(See the  manual page <span class="hljs-keyword">for</span>  execve(<span class="hljs-number">2</span>) <span class="hljs-keyword">for</span> further details about the replacement of the current process image.)</span>
+
+   ····
+    The <span class="hljs-keyword">const</span> <span class="hljs-keyword">char</span> *arg <span class="hljs-keyword">and</span> subsequent ellipses in the <span class="hljs-title">execl</span><span class="hljs-params">()</span>,<span class="hljs-title">execlp</span><span class="hljs-params">()</span>, <span class="hljs-keyword">and</span>  <span class="hljs-title">execle</span><span class="hljs-params">()</span>  functions can be thought of as arg0, arg1, ...,argn.Together they describe a <span class="hljs-built_in">list</span> of one <span class="hljs-keyword">or</span> more pointers to null-terminated strings that represent the argument <span class="hljs-built_in">list</span> available to the executed program.  The first argument, by convention, should point to the filename associated with the file being executed.  The <span class="hljs-built_in">list</span> of arguments must be  terminated  by  a null pointer, <span class="hljs-keyword">and</span>,since these are variadic functions, <span class="hljs-keyword">this</span> pointer must be <span class="hljs-title">cast</span> <span class="hljs-params">(<span class="hljs-keyword">char</span> *)</span> <span class="hljs-literal">NULL</span>.
+
+       ......
+       ......
+RETURN VALUE
+    The <span class="hljs-title">exec</span><span class="hljs-params">()</span> functions <span class="hljs-keyword">return</span> only <span class="hljs-keyword">if</span> an error has occurred.  The 
+<span class="hljs-keyword">return</span> value  is  -1,  <span class="hljs-keyword">and</span> errno is <span class="hljs-built_in">set</span> to indicate the error.
+......</span></code></pre>
+<p>注意手册描述，传递的参数，execl,execlp等传递可变参数的形式，最终要以一个NULL指针结束。而execv这种第二个参数是指针数组的形式最终要以一个NULL结尾表示没有更多参数。以execv为例：</p>
+<table>
+<thead>
+<tr>
+<th>原型</th>
+<th>int execv(const char *path, char *const argv[]);</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>path</td>
+<td>要运行的命令字符串，要传递绝对路径</td>
+</tr>
+<tr>
+<td>argv</td>
+<td>运行命令传递的参数，注意argv[0]是程序的名字</td>
+</tr>
+<tr>
+<td>返回值</td>
+<td>只有当程序出错的时候返回-1</td>
+</tr>
+</tbody></table>
+<p>execv等函数会使用新的进程镜像替换当前的进程镜像，进程ID不变，但是当前进程注册的信号处理机制会失效。</p>
+<h5 id="execv函数示例">execv函数示例</h5>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> * argv[])</span>
+</span>{
+    <span class="hljs-keyword">char</span> * cmd_path = <span class="hljs-string">"/bin/uname"</span>;
+    <span class="hljs-keyword">char</span> * cmd_argv[] = {<span class="hljs-string">"/bin/uname"</span>, <span class="hljs-string">"-a"</span>, <span class="hljs-literal">NULL</span>};
+
+    <span class="hljs-keyword">if</span> (execv(cmd_path, cmd_argv)&lt;<span class="hljs-number">0</span>) {
+        perror(<span class="hljs-string">"execv"</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<br>
+
+<h4 id="最小shell">最小shell</h4>
+<p>现在，让我们来设计一个最小shell，并由此更深刻理解shell的工作方式。使用一个全局变量_path保存默认的路径，并且使用全局变量_home_bin存储$HOME/bin目录信息，并检测如果存在的话才会作为默认的命令搜索路径。</p>
+<p>执行命令的基本过程：</p>
+<ol>
+<li>获取用户的输入</li>
+<li>使用strtok按空格分割字符串，第一个字符串作为命令名称，其他的作为参数</li>
+<li>从默认的路径中按照输入的名称搜索文件</li>
+<li>找到的话，fork子进程，在子进程中把绝对路径以及其他参数传递给execv函数执行命令，父进程等待子进程退出。</li>
+<li>否则提示命令未找到。</li>
+</ol>
+<p>先来看最终执行效果：<br><img src="./min-shell_files/sish.png" alt=""></p>
+<pre><code class="language-c hljs cpp"><span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/wait.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;fcntl.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;dirent.h&gt;</span></span>
+
+<span class="hljs-keyword">char</span> *_path[] = {
+    <span class="hljs-literal">NULL</span>,
+    <span class="hljs-string">"/bin"</span>,
+    <span class="hljs-string">"/sbin"</span>,
+    <span class="hljs-string">"/usr/bin"</span>,
+    <span class="hljs-string">"/usr/sbin"</span>,
+    <span class="hljs-string">"/usr/local/bin"</span>,
+    <span class="hljs-string">"/usr/local/sbin"</span>
+};
+
+<span class="hljs-keyword">char</span> _home_bin[<span class="hljs-number">256</span>] = {<span class="hljs-string">'\0'</span>};
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> ARGS_END    1024</span>
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> MAX_NAME_LEN    2048</span>
+
+<span class="hljs-keyword">int</span> _args_ind;
+
+<span class="hljs-keyword">char</span> * _args_p[ARGS_END] = {<span class="hljs-literal">NULL</span>,};
+
+<span class="hljs-keyword">char</span> _cmd_path[MAX_NAME_LEN];
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">find_command</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * dir_list[], <span class="hljs-keyword">int</span> n, <span class="hljs-keyword">char</span>* name)</span></span>;
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> * argv[])</span>
+</span>{
+    _args_ind = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> * path = getenv(<span class="hljs-string">"HOME"</span>);
+    <span class="hljs-comment">//这里并没有对长度做检测，实际上Linux会对用户名有最大长度限制</span>
+    <span class="hljs-keyword">if</span> (path) {
+        <span class="hljs-built_in">strcpy</span>(_home_bin, path);
+        <span class="hljs-built_in">strcat</span>(_home_bin, <span class="hljs-string">"/bin"</span>);
+    }
+
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">stat</span> <span class="hljs-title">st</span>;</span>
+
+    <span class="hljs-keyword">if</span> (access(_home_bin,F_OK|R_OK|X_OK)==<span class="hljs-number">0</span>
+        &amp;&amp; lstat(_home_bin, &amp;st)==<span class="hljs-number">0</span>
+        &amp;&amp; S_ISDIR(st.st_mode)
+    ) {
+        _path[<span class="hljs-number">0</span>] = _home_bin;
+    }
+
+    <span class="hljs-keyword">int</span> pid = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> cmd_buf[<span class="hljs-number">8192</span>] = {<span class="hljs-string">'\0'</span>};
+    <span class="hljs-keyword">int</span> count = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> **cmd_argv = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-keyword">int</span> i;
+    <span class="hljs-keyword">while</span> (<span class="hljs-number">1</span>) {
+        write(<span class="hljs-number">1</span>, <span class="hljs-string">"|==&gt;"</span>, <span class="hljs-number">4</span>); <span class="hljs-comment">//提示符信息</span>
+        count = read(<span class="hljs-number">0</span>,cmd_buf,<span class="hljs-number">8191</span>); 读取用户输入
+        <span class="hljs-keyword">if</span> (count&lt;<span class="hljs-number">0</span>) {
+            perror(<span class="hljs-string">"read"</span>);
+            <span class="hljs-keyword">continue</span>;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">/*
+                初始化一些信息，并开始解析参数，获取到的用户输入是一个字符串，
+                要把字符串根据空格分割成数组（C语言中就是多个子串），然后把
+                第一个作为命令名称，其他的作为参数
+            */</span>
+            cmd_buf[count<span class="hljs-number">-1</span>] = <span class="hljs-string">'\0'</span>;
+            _args_ind = <span class="hljs-number">0</span>;
+            _args_p[_args_ind] = strtok(cmd_buf, <span class="hljs-string">" "</span>);
+            <span class="hljs-keyword">if</span> (_args_p[_args_ind]!=<span class="hljs-literal">NULL</span>) {
+                <span class="hljs-keyword">while</span> (_args_ind &lt; ARGS_END) {
+                    _args_ind++;
+                    <span class="hljs-comment">//记录每个字串的位置</span>
+                    _args_p[_args_ind] = strtok(<span class="hljs-literal">NULL</span>, <span class="hljs-string">" "</span>);
+                    <span class="hljs-keyword">if</span> (_args_p[_args_ind]==<span class="hljs-literal">NULL</span>)<span class="hljs-keyword">break</span>;
+                }
+            } <span class="hljs-keyword">else</span> {
+                _args_ind = <span class="hljs-number">0</span>;
+            }
+
+            <span class="hljs-keyword">if</span> (_args_p[<span class="hljs-number">0</span>]==<span class="hljs-literal">NULL</span> || <span class="hljs-built_in">strlen</span>(_args_p[<span class="hljs-number">0</span>])==<span class="hljs-number">0</span>)
+                <span class="hljs-keyword">continue</span>;
+        }
+
+        cmd_argv = (<span class="hljs-keyword">char</span>**)<span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">char</span>*)*(_args_ind+<span class="hljs-number">1</span>));
+        <span class="hljs-keyword">if</span> (cmd_argv == <span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"malloc"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+        <span class="hljs-keyword">for</span>(i=<span class="hljs-number">0</span>;i&lt;_args_ind;i++)
+            cmd_argv[i] = _args_p[i];
+
+        <span class="hljs-comment">//execv要求第二个参数的格式：必须是NULL结尾</span>
+        cmd_argv[_args_ind] = <span class="hljs-literal">NULL</span>; 
+
+        <span class="hljs-keyword">int</span> p_size = <span class="hljs-keyword">sizeof</span>(_path);
+        <span class="hljs-keyword">int</span> chp_size = <span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">char</span>*);
+        <span class="hljs-comment">//查找命令</span>
+        <span class="hljs-keyword">if</span> (find_command(_path,p_size/chp_size,cmd_argv[<span class="hljs-number">0</span>])) 
+        {
+            <span class="hljs-built_in">printf</span>(<span class="hljs-string">"Error,command not found:%s\n"</span>,cmd_argv[<span class="hljs-number">0</span>]);
+            <span class="hljs-keyword">continue</span>;
+        }
+
+        pid = fork();
+        <span class="hljs-keyword">if</span> (pid &lt; <span class="hljs-number">0</span>) {
+            perror(<span class="hljs-string">"fork"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+
+        <span class="hljs-keyword">if</span> (pid &gt; <span class="hljs-number">0</span>) {
+            <span class="hljs-keyword">int</span> status = <span class="hljs-number">0</span>;
+            wait(&amp;status);<span class="hljs-comment">//父进程等待子进程退出</span>
+            <span class="hljs-built_in">free</span>(cmd_argv);
+            cmd_argv = <span class="hljs-literal">NULL</span>;
+        }
+
+        <span class="hljs-keyword">if</span> (pid == <span class="hljs-number">0</span>) {
+            <span class="hljs-comment">//子进程执行命令</span>
+            <span class="hljs-keyword">if</span> (execv(_cmd_path, cmd_argv)&lt;<span class="hljs-number">0</span>) {
+                perror(<span class="hljs-string">"execv"</span>);
+                <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+            }
+        }
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">find_command</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * dir_list[], <span class="hljs-keyword">int</span> n, <span class="hljs-keyword">char</span> * name)</span> </span>{
+
+    DIR * d = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">dirent</span> * <span class="hljs-title">rd</span>;</span>
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i=<span class="hljs-number">0</span>; i&lt;n; i++) {
+        <span class="hljs-keyword">if</span> (dir_list[i]==<span class="hljs-literal">NULL</span>)<span class="hljs-keyword">continue</span>;
+
+        d = opendir(dir_list[i]);
+        <span class="hljs-keyword">if</span> (d==<span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"opendir"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+        <span class="hljs-keyword">while</span>((rd = readdir(d))!=<span class="hljs-literal">NULL</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, <span class="hljs-string">".."</span>)==<span class="hljs-number">0</span>
+               || <span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, <span class="hljs-string">"."</span>)==<span class="hljs-number">0</span>)
+                <span class="hljs-keyword">continue</span>;
+            <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, name)==<span class="hljs-number">0</span>) {
+                <span class="hljs-built_in">strcpy</span>(_cmd_path, dir_list[i]);
+                <span class="hljs-built_in">strcat</span>(_cmd_path, <span class="hljs-string">"/"</span>);
+                <span class="hljs-built_in">strcat</span>(_cmd_path, rd-&gt;d_name);
+                closedir(d);
+                <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+            }
+        }
+        closedir(d);
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+}</code></pre>
+<p>这个程序需要强制退出，我们并没有提供exit命令控制程序退出，也没有提供cd，pwd等命令，这些命令都要实现为内建命令。而且没有检测命令是否指定了路径，并且现在实现的shell没有处理SIGINT信号。</p>
+<h3 id="加入内建命令以及信号处理">加入内建命令以及信号处理</h3>
+<p>这里使用一个build_in函数执行内建命令，我们实现的shell在执行命令的时候先检测是不是内建命令，是的话执行，否则从默认路径搜索加载执行。</p>
+<p>注册SIGINT信号的处理函数，在用户输入Ctrl+C的时候不会退出。</p>
+<pre><code class="hljs cpp">
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/wait.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;fcntl.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;sys/stat.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">include</span> <span class="hljs-meta-string">&lt;dirent.h&gt;</span></span>
+
+<span class="hljs-keyword">char</span> *_path[] = {
+    <span class="hljs-string">"\0"</span>,
+    <span class="hljs-string">"/bin"</span>,
+    <span class="hljs-string">"/sbin"</span>,
+    <span class="hljs-string">"/usr/bin"</span>,
+    <span class="hljs-string">"/usr/sbin"</span>,
+    <span class="hljs-string">"/usr/local/bin"</span>,
+    <span class="hljs-string">"/usr/local/sbin"</span>
+};
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> ARGS_END    1024</span>
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> MAX_NAME_LEN    2048</span>
+
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> BUILD_NOTFD     -1</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> BUILD_OK        0</span>
+<span class="hljs-meta">#<span class="hljs-meta-keyword">define</span> BUILD_ERR       1</span>
+
+<span class="hljs-keyword">int</span> _args_ind;
+
+<span class="hljs-keyword">char</span> * _args_p[ARGS_END] = {<span class="hljs-literal">NULL</span>,};
+
+<span class="hljs-keyword">char</span> _cmd_path[MAX_NAME_LEN];
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">find_command</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * dir_list[], <span class="hljs-keyword">int</span> n, <span class="hljs-keyword">char</span>* name)</span></span>;
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">build_in</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * cmd, <span class="hljs-keyword">char</span> * cmd_argv[])</span></span>;
+
+<span class="hljs-function"><span class="hljs-keyword">void</span> <span class="hljs-title">handle_sig</span><span class="hljs-params">(<span class="hljs-keyword">int</span> sig)</span> </span>{
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">"\n"</span>);
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">main</span><span class="hljs-params">(<span class="hljs-keyword">int</span> argc, <span class="hljs-keyword">char</span> * argv[])</span>
+</span>{
+
+    signal(SIGINT, handle_sig);
+
+    _args_ind = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> * path = getenv(<span class="hljs-string">"HOME"</span>);
+    <span class="hljs-keyword">char</span> home_bin[<span class="hljs-number">256</span>] = {<span class="hljs-string">'\0'</span>};
+    <span class="hljs-built_in">strcpy</span>(home_bin, path);
+    <span class="hljs-built_in">strcat</span>(home_bin, <span class="hljs-string">"/bin"</span>);
+
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">stat</span> <span class="hljs-title">st</span>;</span>
+
+    <span class="hljs-keyword">if</span> (access(home_bin,F_OK|R_OK|X_OK)==<span class="hljs-number">0</span>
+        &amp;&amp; lstat(home_bin, &amp;st)==<span class="hljs-number">0</span>
+        &amp;&amp; S_ISDIR(st.st_mode)
+    ) {
+        _path[<span class="hljs-number">0</span>] = home_bin;
+    } <span class="hljs-keyword">else</span> {
+        home_bin[<span class="hljs-number">0</span>] = <span class="hljs-string">'\0'</span>;
+    }
+
+    <span class="hljs-keyword">int</span> pid = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> cmd_buf[<span class="hljs-number">8192</span>] = {<span class="hljs-string">'\0'</span>};
+    <span class="hljs-keyword">int</span> count = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">char</span> **cmd_argv = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-keyword">int</span> i;
+    <span class="hljs-keyword">int</span> len_tmp = <span class="hljs-number">0</span>;
+    <span class="hljs-keyword">while</span> (<span class="hljs-number">1</span>) {
+        write(<span class="hljs-number">1</span>, <span class="hljs-string">"|==&gt;"</span>, <span class="hljs-number">4</span>);
+        count = read(<span class="hljs-number">0</span>,cmd_buf,<span class="hljs-number">8191</span>);
+        <span class="hljs-keyword">if</span> (count&lt;<span class="hljs-number">0</span>) {
+            perror(<span class="hljs-string">"read"</span>);
+            <span class="hljs-keyword">continue</span>;
+        } <span class="hljs-keyword">else</span> {
+            cmd_buf[count<span class="hljs-number">-1</span>] = <span class="hljs-string">'\0'</span>;
+            _args_ind = <span class="hljs-number">0</span>;
+            _args_p[_args_ind] = strtok(cmd_buf, <span class="hljs-string">" "</span>);
+            <span class="hljs-keyword">if</span> (_args_p[_args_ind]!=<span class="hljs-literal">NULL</span>) {
+                <span class="hljs-keyword">while</span> (_args_ind &lt; ARGS_END) {
+                    _args_ind++;
+                    _args_p[_args_ind] = strtok(<span class="hljs-literal">NULL</span>, <span class="hljs-string">" "</span>);
+                    <span class="hljs-keyword">if</span> (_args_p[_args_ind]==<span class="hljs-literal">NULL</span>)<span class="hljs-keyword">break</span>;
+                }
+            } <span class="hljs-keyword">else</span> {
+                _args_ind = <span class="hljs-number">0</span>;
+            }
+
+            <span class="hljs-keyword">if</span> (_args_p[<span class="hljs-number">0</span>]==<span class="hljs-literal">NULL</span> || <span class="hljs-built_in">strlen</span>(_args_p[<span class="hljs-number">0</span>])==<span class="hljs-number">0</span>)
+                <span class="hljs-keyword">continue</span>;
+        }
+
+        cmd_argv = (<span class="hljs-keyword">char</span>**)<span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">char</span>*)*(_args_ind+<span class="hljs-number">1</span>));
+        <span class="hljs-keyword">if</span> (cmd_argv == <span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"malloc"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+        <span class="hljs-keyword">for</span>(i=<span class="hljs-number">0</span>;i&lt;_args_ind;i++)
+            cmd_argv[i] = _args_p[i];
+
+        cmd_argv[_args_ind] = <span class="hljs-literal">NULL</span>;
+
+        <span class="hljs-keyword">if</span> (build_in(cmd_argv[<span class="hljs-number">0</span>], cmd_argv+<span class="hljs-number">1</span>) != BUILD_NOTFD) {
+            <span class="hljs-keyword">continue</span>;
+        }
+
+        <span class="hljs-comment">//如果指定了路径，则不需要再去查找</span>
+        <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strchr</span>(cmd_argv[<span class="hljs-number">0</span>], <span class="hljs-string">'/'</span>) != <span class="hljs-literal">NULL</span>) {
+            <span class="hljs-keyword">if</span> (cmd_argv[<span class="hljs-number">0</span>][<span class="hljs-number">0</span>] == <span class="hljs-string">'/'</span>) {
+                <span class="hljs-built_in">strcpy</span>(_cmd_path, cmd_argv[<span class="hljs-number">0</span>]);
+            } <span class="hljs-keyword">else</span> {
+                getcwd(_cmd_path, MAX_NAME_LEN - <span class="hljs-number">2</span>);
+                <span class="hljs-built_in">strcat</span>(_cmd_path, <span class="hljs-string">"/"</span>);
+                len_tmp = <span class="hljs-built_in">strlen</span>(_cmd_path);
+                <span class="hljs-built_in">strncat</span>(_cmd_path, cmd_argv[<span class="hljs-number">0</span>], MAX_NAME_LEN - len_tmp - <span class="hljs-number">1</span>);
+            }
+        }
+        <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (find_command(_path, <span class="hljs-keyword">sizeof</span>(_path)/<span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">char</span>*), cmd_argv[<span class="hljs-number">0</span>])) {
+            <span class="hljs-built_in">printf</span>(<span class="hljs-string">"Error: command not found -&gt; %s\n"</span>, cmd_argv[<span class="hljs-number">0</span>]);
+            <span class="hljs-keyword">continue</span>;
+        }
+
+        pid = fork();
+        <span class="hljs-keyword">if</span> (pid &lt; <span class="hljs-number">0</span>) {
+            perror(<span class="hljs-string">"fork"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+
+        <span class="hljs-keyword">if</span> (pid &gt; <span class="hljs-number">0</span>) {
+            <span class="hljs-keyword">int</span> status = <span class="hljs-number">0</span>;
+            wait(&amp;status);
+            <span class="hljs-built_in">free</span>(cmd_argv);
+            cmd_argv = <span class="hljs-literal">NULL</span>;
+        }
+
+        <span class="hljs-keyword">if</span> (pid == <span class="hljs-number">0</span>) {
+            <span class="hljs-keyword">if</span> (execv(_cmd_path, cmd_argv)&lt;<span class="hljs-number">0</span>) {
+                perror(<span class="hljs-string">"execv"</span>);
+                <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+            }
+        }
+    }
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">find_command</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * dir_list[], <span class="hljs-keyword">int</span> n, <span class="hljs-keyword">char</span> * name)</span> </span>{
+
+    DIR * d = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">dirent</span> * <span class="hljs-title">rd</span>;</span>
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-keyword">int</span> i=<span class="hljs-number">0</span>; i&lt;n; i++) {
+        d = opendir(dir_list[i]);
+        <span class="hljs-keyword">if</span> (d==<span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"opendir"</span>);
+            <span class="hljs-keyword">continue</span>;
+        }
+        <span class="hljs-keyword">while</span>((rd = readdir(d))!=<span class="hljs-literal">NULL</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, <span class="hljs-string">".."</span>)==<span class="hljs-number">0</span> || <span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, <span class="hljs-string">"."</span>)==<span class="hljs-number">0</span>)
+                <span class="hljs-keyword">continue</span>;
+            <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(rd-&gt;d_name, name)==<span class="hljs-number">0</span>) {
+                <span class="hljs-built_in">strcpy</span>(_cmd_path, dir_list[i]);
+                <span class="hljs-built_in">strcat</span>(_cmd_path, <span class="hljs-string">"/"</span>);
+                <span class="hljs-built_in">strcat</span>(_cmd_path, rd-&gt;d_name);
+                closedir(d);
+                <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+            }
+        }
+        closedir(d);
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+}
+
+<span class="hljs-function"><span class="hljs-keyword">int</span> <span class="hljs-title">build_in</span><span class="hljs-params">(<span class="hljs-keyword">char</span> * cmd, <span class="hljs-keyword">char</span> * cmd_argv[])</span> </span>{
+
+    <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(cmd, <span class="hljs-string">"cd"</span>)==<span class="hljs-number">0</span>) {
+        <span class="hljs-keyword">if</span> (cmd_argv[<span class="hljs-number">0</span>]==<span class="hljs-literal">NULL</span>)
+            chdir(getenv(<span class="hljs-string">"HOME"</span>));
+        <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">if</span> (chdir(cmd_argv[<span class="hljs-number">0</span>])&lt;<span class="hljs-number">0</span>) {
+                perror(<span class="hljs-string">"chdir"</span>);
+                <span class="hljs-keyword">return</span> BUILD_ERR;
+            }
+        }
+    } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(cmd, <span class="hljs-string">"pwd"</span>)==<span class="hljs-number">0</span>) {
+        <span class="hljs-keyword">char</span> cwd[MAX_NAME_LEN] = {<span class="hljs-string">'\0'</span>};
+        <span class="hljs-keyword">if</span> (getcwd(cwd, MAX_NAME_LEN<span class="hljs-number">-1</span>)==<span class="hljs-literal">NULL</span>) {
+            perror(<span class="hljs-string">"getcwd"</span>);
+            <span class="hljs-keyword">return</span> BUILD_ERR;
+        }
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"%s\n"</span>,cwd);
+    } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(cmd, <span class="hljs-string">"help"</span>)==<span class="hljs-number">0</span>) {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">"There is no help\n"</span>);
+    } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strcmp</span>(cmd, <span class="hljs-string">"exit"</span>)==<span class="hljs-number">0</span> || <span class="hljs-built_in">strcmp</span>(cmd, <span class="hljs-string">"quit"</span>)==<span class="hljs-number">0</span>) {
+        _exit(<span class="hljs-number">0</span>);
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-keyword">return</span> BUILD_NOTFD;
+    }
+
+    <span class="hljs-keyword">return</span> BUILD_OK;
+}
+</code></pre></div>
+        <div class="cell medium-1 large-3"></div>
+    </div>
+</div>
+
+</body></html>
