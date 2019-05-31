@@ -450,11 +450,7 @@ RETURN VALUE
 
         cmd_argv[_args_ind] = <span class="hljs-literal">NULL</span>;
 
-        <span class="hljs-keyword">if</span> (build_in(cmd_argv[<span class="hljs-number">0</span>], cmd_argv+<span class="hljs-number">1</span>) != BUILD_NOTFD) {
-            <span class="hljs-keyword">continue</span>;
-        }
-
-        <span class="hljs-comment">//如果指定了路径，则不需要再去查找</span>
+         <span class="hljs-comment">//如果指定了路径，则不需要再去查找</span>
         <span class="hljs-keyword">if</span> (<span class="hljs-built_in">strchr</span>(cmd_argv[<span class="hljs-number">0</span>], <span class="hljs-string">'/'</span>) != <span class="hljs-literal">NULL</span>) {
             <span class="hljs-keyword">if</span> (cmd_argv[<span class="hljs-number">0</span>][<span class="hljs-number">0</span>] == <span class="hljs-string">'/'</span>) {
                 <span class="hljs-built_in">strcpy</span>(_cmd_path, cmd_argv[<span class="hljs-number">0</span>]);
@@ -464,6 +460,9 @@ RETURN VALUE
                 len_tmp = <span class="hljs-built_in">strlen</span>(_cmd_path);
                 <span class="hljs-built_in">strncat</span>(_cmd_path, cmd_argv[<span class="hljs-number">0</span>], MAX_NAME_LEN - len_tmp - <span class="hljs-number">1</span>);
             }
+        }
+        <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (build_in(cmd_argv[<span class="hljs-number">0</span>], cmd_argv+<span class="hljs-number">1</span>) != BUILD_NOTFD) {
+            <span class="hljs-keyword">continue</span>;
         }
         <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span> (find_command(_path, <span class="hljs-keyword">sizeof</span>(_path)/<span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">char</span>*), cmd_argv[<span class="hljs-number">0</span>])) {
             <span class="hljs-built_in">printf</span>(<span class="hljs-string">"Error: command not found -&gt; %s\n"</span>, cmd_argv[<span class="hljs-number">0</span>]);
