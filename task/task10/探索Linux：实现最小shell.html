@@ -342,7 +342,7 @@ RETURN VALUE
     <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
 }</code></pre>
 <p>这个程序需要强制退出，我们并没有提供exit命令控制程序退出，也没有提供cd，pwd等命令，这些命令都要实现为内建命令。而且没有检测命令是否指定了路径，并且现在实现的shell没有处理SIGINT信号。</p>
-<h3 id="加入内建命令以及信号处理">加入内建命令以及信号处理</h3>
+<h4 id="加入内建命令以及信号处理">加入内建命令以及信号处理</h4>
 <p>这里使用一个build_in函数执行内建命令，我们实现的shell在执行命令的时候先检测是不是内建命令，是的话执行，否则从默认路径搜索加载执行。</p>
 <p>注册SIGINT信号的处理函数，在用户输入Ctrl+C的时候不会退出。</p>
 <pre><code class="hljs cpp">
